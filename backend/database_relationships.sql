@@ -244,3 +244,4 @@ CREATE TRIGGER prevent_customer_deletion
 -- 6. View'lar ve fonksiyonlar yetki kontrolünü kolaylaştırır
 
 
+

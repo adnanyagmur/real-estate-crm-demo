@@ -270,3 +270,4 @@ CREATE TRIGGER prevent_customer_deletion
 -- 7. UUID ile business intelligence gizlenir
 
 
+

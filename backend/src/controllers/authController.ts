@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt, { SignOptions } from 'jsonwebtoken';
-import pool from '../config/database';
-import { IUserLogin, IUserRegister, IUserResponse } from '../types';
+import { AuthService } from '../services/authService';
+import { IUserLogin, IUserRegister } from '../types';
 
 /**
  * @swagger
@@ -52,61 +50,37 @@ import { IUserLogin, IUserRegister, IUserResponse } from '../types';
  */
 export const register = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, email, password, first_name, last_name, role = 'agent' }: IUserRegister = req.body;
-
-    // Validation
-    if (!username || !email || !password || !first_name || !last_name) {
-      res.status(400).json({
-        success: false,
-        message: 'Tüm alanlar zorunludur',
-        error: 'Missing required fields'
-      });
-      return;
-    }
-
-    // Check if user already exists
-    const existingUser = await pool.query(
-      'SELECT id FROM users WHERE username = $1 OR email = $2',
-      [username, email]
-    );
-
-    if (existingUser.rows.length > 0) {
-      res.status(409).json({
-        success: false,
-        message: 'Kullanıcı adı veya email zaten kullanımda',
-        error: 'User already exists'
-      });
-      return;
-    }
-
-    // Hash password
-    const saltRounds = 10;
-    const passwordHash = await bcrypt.hash(password, saltRounds);
-
-    // Create user
-    const newUser = await pool.query(
-      'INSERT INTO users (username, email, password_hash, first_name, last_name, role) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *',
-      [username, email, passwordHash, first_name, last_name, role]
-    );
-
-    const user: IUserResponse = {
-      id: newUser.rows[0].id,
-      username: newUser.rows[0].username,
-      email: newUser.rows[0].email,
-      first_name: newUser.rows[0].first_name,
-      last_name: newUser.rows[0].last_name,
-      role: newUser.rows[0].role,
-      status: newUser.rows[0].status,
-      created_at: newUser.rows[0].created_at
-    };
+    const userData: IUserRegister = req.body;
+    const result = await AuthService.register(userData);
 
     res.status(201).json({
       success: true,
-      message: 'Kullanıcı başarıyla oluşturuldu',
-      data: user
+      message: result.message,
+      data: result.user
     });
   } catch (error) {
     console.error('Register error:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Tüm alanlar zorunludur') {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          error: 'Missing required fields'
+        });
+        return;
+      }
+      
+      if (error.message === 'Kullanıcı adı veya email zaten kullanımda') {
+        res.status(409).json({
+          success: false,
+          message: error.message,
+          error: 'User already exists'
+        });
+        return;
+      }
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Sunucu hatası',
@@ -145,85 +119,40 @@ export const register = async (req: Request, res: Response): Promise<void> => {
  */
 export const login = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { username, password }: IUserLogin = req.body;
-
-    // Validation
-    if (!username || !password) {
-      res.status(400).json({
-        success: false,
-        message: 'Kullanıcı adı ve şifre zorunludur',
-        error: 'Username and password required'
-      });
-      return;
-    }
-
-    // Find user
-    const user = await pool.query(
-      'SELECT * FROM users WHERE username = $1 AND status = $2',
-      [username, 'active']
-    );
-
-    if (user.rows.length === 0) {
-      res.status(401).json({
-        success: false,
-        message: 'Geçersiz kullanıcı adı veya şifre',
-        error: 'Invalid credentials'
-      });
-      return;
-    }
-
-    // Check password
-    const isValidPassword = await bcrypt.compare(password, user.rows[0].password_hash);
-    if (!isValidPassword) {
-      res.status(401).json({
-        success: false,
-        message: 'Geçersiz kullanıcı adı veya şifre',
-        error: 'Invalid credentials'
-      });
-      return;
-    }
-
-    // Generate JWT token
-    const secret = process.env['JWT_SECRET'];
-    if (!secret) {
-      throw new Error('JWT_SECRET not configured');
-    }
-
-    const signOptions: SignOptions = {
-      expiresIn: (process.env['JWT_EXPIRES_IN'] as string) || '24h'
-    } as SignOptions;
-
-    const token = jwt.sign(
-      {
-        userId: user.rows[0].id,
-        username: user.rows[0].username,
-        role: user.rows[0].role
-      },
-      secret,
-      signOptions
-    );
-
-    const userResponse: IUserResponse = {
-      id: user.rows[0].id,
-      username: user.rows[0].username,
-      email: user.rows[0].email,
-      first_name: user.rows[0].first_name,
-      last_name: user.rows[0].last_name,
-      role: user.rows[0].role,
-      status: user.rows[0].status,
-      created_at: user.rows[0].created_at
-    };
+    const loginData: IUserLogin = req.body;
+    const result = await AuthService.login(loginData);
 
     res.json({
       success: true,
-      message: 'Giriş başarılı',
+      message: result.message,
       data: {
-        user: userResponse,
-        token
+        user: result.user,
+        token: result.token
       }
     });
   } catch (error) {
     console.error('Login error:', error);
+    
+    if (error instanceof Error) {
+      if (error.message === 'Kullanıcı adı ve şifre zorunludur') {
+        res.status(400).json({
+          success: false,
+          message: error.message,
+          error: 'Username and password required'
+        });
+        return;
+      }
+      
+      if (error.message === 'Geçersiz kullanıcı adı veya şifre') {
+        res.status(401).json({
+          success: false,
+          message: error.message,
+          error: 'Invalid credentials'
+        });
+        return;
+      }
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Sunucu hatası',
@@ -249,28 +178,35 @@ export const login = async (req: Request, res: Response): Promise<void> => {
 export const getProfile = async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.userId;
-
-    const user = await pool.query(
-      'SELECT id, username, email, first_name, last_name, role, status, created_at FROM users WHERE id = $1',
-      [userId]
-    );
-
-    if (user.rows.length === 0) {
-      res.status(404).json({
+    
+    if (!userId) {
+      res.status(401).json({
         success: false,
-        message: 'Kullanıcı bulunamadı',
-        error: 'User not found'
+        message: 'Yetkilendirme gerekli',
+        error: 'Authorization required'
       });
       return;
     }
 
+    const result = await AuthService.getProfile(userId);
+
     res.json({
       success: true,
-      message: 'Profil bilgileri',
-      data: user.rows[0]
+      message: result.message,
+      data: result.user
     });
   } catch (error) {
     console.error('Get profile error:', error);
+    
+    if (error instanceof Error && error.message === 'Kullanıcı bulunamadı') {
+      res.status(404).json({
+        success: false,
+        message: error.message,
+        error: 'User not found'
+      });
+      return;
+    }
+    
     res.status(500).json({
       success: false,
       message: 'Sunucu hatası',
